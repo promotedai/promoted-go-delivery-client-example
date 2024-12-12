@@ -12,24 +12,21 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Example Product type.
+// Product is an example Proto struct.
 type Product struct {
 	ID    string
 	Name  string
 	Price int
 }
 
-// Configuration struct
 type Config struct {
-	MetricsApiEndpointUrl  string
-	MetricsApiKey          string
-	DeliveryApiEndpointUrl string
-	DeliveryApiKey         string
-	OnlyLog                bool
-	// TODO - implement
+	MetricsApiEndpointUrl     string
+	MetricsApiKey             string
+	DeliveryApiEndpointUrl    string
+	DeliveryApiKey            string
+	OnlyLog                   bool
 	ShadowTrafficDeliveryRate float64
-	// TODO - implement
-	BlockingShadowTraffic bool
+	BlockingShadowTraffic     bool
 }
 
 func main() {
@@ -43,10 +40,6 @@ func main() {
 		ShadowTrafficDeliveryRate: parseFloatEnv("SHADOW_TRAFFIC_DELIVERY_RATE", 0.0),
 		BlockingShadowTraffic:     parseBoolEnv("BLOCKING_SHADOW_TRAFFIC", false),
 	}
-
-	fmt.Print("Promoted Delivery Client\n")
-	fmt.Print(config.MetricsApiEndpointUrl)
-	fmt.Print("\n")
 
 	// Validate arguments
 	if err := validateConfig(config); err != nil {
@@ -65,17 +58,14 @@ func main() {
 	products := getProducts()
 
 	// Create a map of products to reorder after Promoted ranking.
-	productsMap := make(map[string]Product, len(products))
-
-	// Create insertions for each product for the Promtoed delivery request.
-	insertions := make([]*delivery.Insertion, 0, len(products))
+	productsMap := make(map[string]*Product, len(products))
 	for _, product := range products {
-		insertions = append(insertions, &delivery.Insertion{ContentId: product.ID})
 		productsMap[product.ID] = product
 	}
 
 	// Build request
-	req, err := newTestRequest(insertions, config.OnlyLog)
+	requestInsertions := newTestRequestInsertions(products)
+	req, err := newTestRequest(requestInsertions, config.OnlyLog)
 	if err != nil {
 		fmt.Println("newTestRequest failed")
 		panic(err)
@@ -120,6 +110,7 @@ func validateConfig(config Config) error {
 }
 
 func newTestRequest(insertions []*delivery.Insertion, onlyLog bool) (*client.DeliveryRequest, error) {
+	// Request-level parameters go here.
 	requestPropsValue, err := structpb.NewValue(map[string]any{
 		"category": "topic",
 		"priceMin": 10.0,
@@ -127,7 +118,6 @@ func newTestRequest(insertions []*delivery.Insertion, onlyLog bool) (*client.Del
 	if err != nil {
 		return nil, err
 	}
-	requestPropsStruct := requestPropsValue.GetStructValue()
 	return &client.DeliveryRequest{
 		Request: &delivery.Request{
 			UserInfo: &common.UserInfo{
@@ -143,13 +133,38 @@ func newTestRequest(insertions []*delivery.Insertion, onlyLog bool) (*client.Del
 			DisablePersonalization: false,
 			Properties: &common.Properties{
 				StructField: &common.Properties_Struct{
-					Struct: requestPropsStruct,
+					Struct: requestPropsValue.GetStructValue(),
 				},
 			},
 			Insertion: insertions,
 		},
 		OnlyLog: onlyLog,
 	}, nil
+}
+
+func newTestRequestInsertions(products []*Product) []*delivery.Insertion {
+	// Build request
+	// Create insertions for each product for the Promtoed delivery request.
+	insertions := make([]*delivery.Insertion, 0, len(products))
+	for _, product := range products {
+		// This example sends price as a dynamic property.  If price is static, it can be sent through Content Store.
+		insertionPropsValue, err := structpb.NewValue(map[string]any{
+			"price": product.Price,
+		})
+		if err != nil {
+			fmt.Println("insertion structpb.NewValue failed")
+			panic(err)
+		}
+		insertions = append(insertions, &delivery.Insertion{
+			ContentId: product.ID,
+			Properties: &common.Properties{
+				StructField: &common.Properties_Struct{
+					Struct: insertionPropsValue.GetStructValue(),
+				},
+			},
+		})
+	}
+	return insertions
 }
 
 func parseBoolEnv(key string, defaultValue bool) bool {
@@ -189,8 +204,8 @@ func NewPromotedDeliveryClient(config Config) (*client.PromotedDeliveryClient, e
 		Build()
 }
 
-func getProducts() []Product {
-	return []Product{
+func getProducts() []*Product {
+	return []*Product{
 		{
 			ID:    "1",
 			Name:  "Product 1",
